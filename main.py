@@ -137,6 +137,71 @@ def _lib_default_date():
     return now.date().isoformat()
 
 
+def _parse_time_range(tok):
+    """'08:00-10:00' / '8-10' / '8:00~10:00' → (开始分钟, 结束分钟)。"""
+    if not tok:
+        return None
+    m = re.match(r"^\s*(\d{1,2})(?::(\d{2}))?\s*[-~—到]\s*(\d{1,2})(?::(\d{2}))?\s*$",
+                 str(tok))
+    if not m:
+        return None
+    b = int(m.group(1)) * 60 + int(m.group(2) or 0)
+    e = int(m.group(3)) * 60 + int(m.group(4) or 0)
+    if 0 <= b < e <= 24 * 60:
+        return b, e
+    return None
+
+
+def _fmt_min(m):
+    return "%02d:%02d" % (int(m) // 60, int(m) % 60)
+
+
+def _looks_like_date(tok):
+    t = str(tok)
+    return t in ("今天", "明天", "后天", "today", "tomorrow") or bool(
+        re.match(r"^\d{4}-\d{1,2}-\d{1,2}$", t))
+
+
+def _split_date_window(tokens, default_date):
+    """从参数里拆出日期和时间段，两个都支持任意顺序。"""
+    date, window = default_date, None
+    for t in tokens:
+        w = _parse_time_range(t)
+        if w:
+            window = w
+        elif _looks_like_date(t):
+            date = _parse_date_arg(t)
+    return date, window
+
+
+def _lib_free_keys(room_id, date, window, token):
+    """指定时间段内可约的座位 key 集合。"""
+    if not window:
+        return None, None
+    begin, end = window
+    path = "/rest/v2/searchSeats/%s/%d/%d?roomId=%s" % (date, begin, end, room_id)
+    obj = _lib_get(path, token=token)
+    data = obj.get("data")
+    if data is None:
+        return None, obj.get("message") or "接口没返回数据"
+    return set((data.get("seats") or {}).keys()), None
+
+
+def _lib_building_window(building_id, date, window, token):
+    """按时间段统计整栋楼各房间空位：返回 {roomId: free}。"""
+    begin, end = window
+    path = "/rest/v2/searchSeats/%s/%d/%d?buildingId=%s" % (date, begin, end, building_id)
+    obj = _lib_get(path, token=token)
+    data = obj.get("data")
+    if data is None:
+        return None, obj.get("message") or "接口没返回数据"
+    counts = {}
+    for _k, cell in (data.get("seats") or {}).items():
+        rid = cell.get("roomId")
+        counts[rid] = counts.get(rid, 0) + 1
+    return counts, None
+
+
 def _parse_date_arg(tok):
     """支持 今天/明天/后天/YYYY-MM-DD，默认今天。"""
     if not tok:
@@ -506,7 +571,7 @@ def _lib_status_text():
     return "\n".join(lines)
 
 
-def _lib_stats_text(building_name, date, token):
+def _lib_stats_text(building_name, date, token, window=None):
     bid = LIB_BUILDINGS.get(building_name)
     if not bid:
         return "馆区只有：东馆 / 总馆"
@@ -515,6 +580,12 @@ def _lib_stats_text(building_name, date, token):
         return ("⚠️ 图书馆登录态失效了。\n"
                 "在电脑上跑一次 login.bat 重新登录。\n（%s）" % (obj.get("message") or "接口异常"))
     rooms = obj.get("data") or []
+    if window:
+        counts, err = _lib_building_window(bid, date, window, token)
+        if counts is None:
+            return "⚠️ 按时间段查询失败：%s" % err
+        for r in rooms:
+            r["free"] = counts.get(r.get("roomId"), 0)
     total_free = sum(r.get("free", 0) for r in rooms)
     total_seats = sum(r.get("totalSeats", 0) for r in rooms)
     lines = ["🏛 %s · %s" % (building_name, _date_label(date)),
@@ -545,7 +616,8 @@ def _lib_layout_text(room_id, date, token):
     return "\n".join(lines)
 
 
-def _lib_quiet_seats_text(room_id, date, token, radius=2, top=10, blacklist=None):
+def _lib_quiet_seats_text(room_id, date, token, radius=2, top=10, blacklist=None,
+                          free_keys=None):
     """从座位图里挑「周围没人的座位」：周边格子被占越少越安静。"""
     obj = _lib_get("/rest/v2/room/layoutByDate/%s/%s" % (room_id, date), token=token)
     if obj.get("status") != "success":
@@ -557,17 +629,22 @@ def _lib_quiet_seats_text(room_id, date, token, radius=2, top=10, blacklist=None
     layout = d.get("layout") or {}
 
     seats = {}
+    key_of = {}
     for k, c in layout.items():
         if c.get("type") != "seat" or c.get("enabled") is False:
             continue
         pos = _cell_pos(k, cols, rows)
         if pos:
             seats[pos] = c
+            key_of[pos] = k
 
     if not seats:
         return "这间教室没有可预约的座位。"
 
-    free = {p for p, c in seats.items() if c.get("status") == "FREE"}
+    if free_keys is not None:
+        free = {p for p in seats if key_of.get(p) in free_keys}
+    else:
+        free = {p for p, c in seats.items() if c.get("status") == "FREE"}
     if blacklist:
         free = {p for p in free if str(seats[p].get("name") or "") not in blacklist}
     occupied = set(seats) - free
@@ -742,7 +819,8 @@ def _write_png(path, width, height, rows_rgb):
         f.write(png)
 
 
-def _render_layout_png(data, path, cell=26, blacklist=None, show_numbers=True):
+def _render_layout_png(data, path, cell=26, blacklist=None, show_numbers=True,
+                       free_keys=None):
     """把 seat layout 画成示意图（带座位号），返回 (路径, 统计)。"""
     cols = int(data.get("cols") or 1)
     rows = int(data.get("rows") or 1)
@@ -789,11 +867,12 @@ def _render_layout_png(data, path, cell=26, blacklist=None, show_numbers=True):
                 continue
             seat_n += 1
             name = str(c.get("name") or "")
+            is_free = (k in free_keys) if free_keys is not None else (status == "FREE")
             if name in blacklist:
                 block_n += 1
                 paint(col * cell + 1, r * cell + 1, C_BLOCK, cell - 2)
                 numbers.append((r, col, name, C_TEXT_LIGHT))
-            elif status == "FREE":
+            elif is_free:
                 free_n += 1
                 paint(col * cell + 1, r * cell + 1, C_FREE, cell - 2)
                 numbers.append((r, col, name, C_TEXT_DARK))
@@ -1084,8 +1163,12 @@ class UPCPlugin(Star):
         """图书馆：/图书馆 | 东馆 | 总馆 | 座位 <id> | 我的"""
         args = _args(event, {"图书馆", "座位", "空座"})
         sub = args[0] if args else ""
-        date = (_parse_date_arg(args[2]) if len(args) > 2
-                else _lib_default_date())
+        date = _lib_default_date()
+        window = None
+        if sub in ("东馆", "总馆"):
+            date, window = _split_date_window(args[1:], date)
+        elif sub in ("地图", "示意图", "图", "空位", "安静", "筛选", "座位", "座位图"):
+            date, window = _split_date_window(args[2:], date)
         image_path = None
 
         try:
@@ -1097,7 +1180,8 @@ class UPCPlugin(Star):
                     text = ("⚠️ 房间级查询需要图书馆登录态。\n"
                             "在电脑上跑一次 login.bat（约 10 秒），或者先看 /图书馆 的实时空座。")
                 else:
-                    text = await asyncio.to_thread(_lib_stats_text, sub, date, token)
+                    text = await asyncio.to_thread(
+                        _lib_stats_text, sub, date, token, window)
             elif sub in ("空位", "安静", "筛选"):
                 token = await self._get_token()
                 if not token:
@@ -1105,9 +1189,15 @@ class UPCPlugin(Star):
                 elif len(args) < 2 or not args[1].isdigit():
                     text = "用法：/图书馆 空位 <房间id>\n例：/图书馆 空位 2（阅览区1F-A）"
                 else:
-                    text = await asyncio.to_thread(
-                        _lib_quiet_seats_text, args[1], date, token,
-                        blacklist=_blacklist_for(args[1]))
+                    free_keys, err = await asyncio.to_thread(
+                        _lib_free_keys, args[1], date, window, token)
+                    if free_keys is None and window:
+                        text = "⚠️ 按时间段查询失败：%s" % err
+                    else:
+                        text = await asyncio.to_thread(
+                            _lib_quiet_seats_text, args[1], date, token,
+                            blacklist=_blacklist_for(args[1]),
+                            free_keys=free_keys)
             elif sub in ("座位", "座位图"):
                 token = await self._get_token()
                 if not token:
@@ -1190,14 +1280,26 @@ class UPCPlugin(Star):
                         text = "⚠️ 登录态失效了：%s" % (obj.get("message") or "接口异常")
                     else:
                         d = obj.get("data") or {}
-                        png = os.path.join(tempfile.gettempdir(), "upc_seat_%s.png" % args[1])
-                        png, st = await asyncio.to_thread(
-                            _render_layout_png, d, png, 26, _blacklist_for(args[1]))
-                        image_path = png
-                        text = ("🪑 %s · %s\n空位 %d / 座位 %d（有人 %d，黑名单 %d）\n"
-                                "图例：绿=空座  红=有人  深黑=黑名单  浅灰=不可用  蓝=桌子  白=走廊"
-                                % (d.get("name"), _date_label(date),
-                                   st["free"], st["seats"], st["used"], st.get("blocked", 0)))
+                        free_keys, err = await asyncio.to_thread(
+                            _lib_free_keys, args[1], date, window, token)
+                        if free_keys is None and window:
+                            text = "⚠️ 按时间段查询失败：%s" % err
+                        else:
+                            png = os.path.join(tempfile.gettempdir(),
+                                               "upc_seat_%s.png" % args[1])
+                            png, st = await asyncio.to_thread(
+                                _render_layout_png, d, png, 26,
+                                _blacklist_for(args[1]), True, free_keys)
+                            image_path = png
+                            when = _date_label(date)
+                            if window:
+                                when += " · %s-%s" % (_fmt_min(window[0]), _fmt_min(window[1]))
+                            text = ("🪑 %s · %s\n空位 %d / 座位 %d（不可约 %d，黑名单 %d）\n"
+                                    "图例：绿=空座  红=该时段已占/不可约  深黑=黑名单  "
+                                    "浅灰=不可用  蓝=桌子  白=走廊"
+                                    % (d.get("name"), when,
+                                       st["free"], st["seats"], st["used"],
+                                       st.get("blocked", 0)))
                         if st["seats"] > 0 and st["free"] == 0:
                             text += ("\n\n⚠️ 这一天全部显示为已占（可能已闭馆或不可预约）。\n"
                                      "试试：/图书馆 地图 %s 明天" % args[1])
@@ -1244,8 +1346,10 @@ class UPCPlugin(Star):
             "/图书馆 拉黑 2 007   拉黑座位（地图变深灰、不再推荐）\n"
             "/图书馆 黑名单       查看黑名单\n"
             "/图书馆 空位 2       找周围没人的座位（需登录）\n"
-            "/图书馆 地图 2       座位示意图（需登录，可加日期）\n"
-            "                     例：/图书馆 地图 2 明天\n"
+            "/图书馆 地图 2       座位示意图（需登录）\n"
+            "                     可加日期/时间段：\n"
+            "                     /图书馆 地图 2 明天 08:00-10:00\n"
+            "/图书馆 东馆 08:00-10:00  房间空位（可按时间）\n"
             "/图书馆 座位 2       座位号（需登录）\n"
             "/图书馆 我的         预约记录（需登录）\n\n"
             "节次：上午/下午/晚上/白天/全天/3-4/10,11")
