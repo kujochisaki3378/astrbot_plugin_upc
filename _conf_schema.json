@@ -1,0 +1,20 @@
+{
+  "username": {
+    "description": "学号",
+    "type": "string",
+    "hint": "数字石大账号，仅用于自动登录换图书馆 token",
+    "default": ""
+  },
+  "password": {
+    "description": "数字石大密码",
+    "type": "string",
+    "hint": "⚠️ 明文保存在本机配置文件；只用于自动登录。不想存就留空，改用 login.bat 手动续 token",
+    "default": ""
+  },
+  "auto_login": {
+    "description": "token 失效时自动登录",
+    "type": "bool",
+    "hint": "开启后填了学号密码就会自动换 token；关闭则只读本地 token 文件",
+    "default": true
+  }
+}

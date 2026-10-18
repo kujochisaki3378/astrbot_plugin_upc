@@ -1,0 +1,37 @@
+name: astrbot_plugin_upc
+display_name: 石大查询
+short_desc: 空教室 / 附近教室 / 图书馆座位图与黑名单（中国石油大学·华东）
+desc: |
+  - /空教室 [楼] [节次]            查哪里能自习（免登录）
+  - /附近 南教305 [节次]           看附近教室哪些空着、哪些有课（带课程名）
+  - /图书馆                        图书馆实时空座 + 开馆时间
+  - /图书馆 东馆|总馆              各房间空位
+  - /图书馆 列表                   房间 id 列表
+  - /图书馆 地图 <id> [日期]       座位示意图（图片，标注座位号）
+  - /图书馆 空位 <id>              找周围没人的座位
+  - /图书馆 拉黑 <id> <座位号>     座位黑名单（地图变深黑、不再推荐）
+  - /图书馆 黑名单 / 取消拉黑
+  - /图书馆 我的                   我的预约
+
+  图书馆相关功能需要一次登录：在插件配置里填学号 + 数字石大密码，
+  插件会自动走 CAS 统一认证换取 token 并自动续期。
+  不填也能用 /空教室、/附近、/图书馆 实时空座。
+
+  说明：个人开发项目，与学校官方无关；只做查询，不做自动预约/抢座。
+version: 1.0.0
+author: kaoruko
+repo: https://github.com/CHANGE_ME/astrbot_plugin_upc
+astrbot_version: ">=4.10.0"
+support_platforms:
+  - aiocqhttp
+  - qq_official
+  - telegram
+  - lark
+  - wecom
+tags:
+  - upc
+  - campus
+  - classroom
+  - library
+  - seat
+  - 中国石油大学
