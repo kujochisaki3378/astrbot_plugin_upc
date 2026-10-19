@@ -11,7 +11,7 @@
 ================================================================================
 项目        中国石油大学（华东）AstrBot 查询插件「石大查询」
 起点        GitHub 上的 InformationQuerySystem（2016 年项目）分析
-最终版本    1.3.2
+最终版本    1.3.3
 开发时间    2026-10-18 21:33 → 2026-10-19 12:23（跨夜，约 14.8 小时）
 GitHub      https://github.com/kujochisaki3378/astrbot_plugin_upc
 作者        kujochisaki
@@ -113,10 +113,21 @@ GitHub      https://github.com/kujochisaki3378/astrbot_plugin_upc
   问题：git 未安装 → 装 Git；GitHub 连不上 → 配 Clash 代理 127.0.0.1:7897
   结果：12:23 推送成功（60 objects / 37 KB），仓库文件验证齐全
 
-【阶段 15】Contributors 清理（当前）
+【阶段 15】Contributors 清理
   用户：Contributors 多了个不认识的旧作者名
   处理：用 git plumbing 重写 10 个提交的作者/提交者为 kujochisaki
   待办：本地已重写，需要用户执行 git push --force-with-lease
+
+【阶段 16｜18:09】插件市场审核反馈与整改
+  审核结论：功能正常、无恶意代码、无凭据外传、请求只发往 *.upc.edu.cn，
+            异步调用已用 asyncio.to_thread 包裹、不阻塞事件循环
+  三个问题：
+    1) 数据持久化路径：用了 ~/.astrbot_plugin_upc/，违反
+       data/plugin_data/<plugin_name> 规范  → 已改，含旧数据自动迁移
+    2) TLS 全局关闭校验（check_hostname=False / CERT_NONE）→ 已恢复默认校验
+    3) 密码明文提示已在 hint 中，按要求再加强说明
+  版本：1.3.3
+  验证：TLS 校验开启后，CAS 登录、课表、空教室、图书馆接口均正常
 
 ================================================================================
 三、DSH 使用情况
@@ -234,5 +245,5 @@ GitHub      https://github.com/kujochisaki3378/astrbot_plugin_upc
 [ ] （可选）多平台验证：QQ（aiocqhttp）等
 
 ================================================================================
-生成时间：2026-10-19 12:35（Asia/Shanghai）
+生成时间：2026-10-19 12:35（Asia/Shanghai）；18:20 更新审核整改（1.3.3）
 ================================================================================

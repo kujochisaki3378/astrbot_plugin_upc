@@ -8,7 +8,7 @@
   "password": {
     "description": "数字石大密码",
     "type": "string",
-    "hint": "⚠️ 明文保存在本机配置文件；只用于自动登录。不想存可以留空，此时只能读取 ~/.astrbot_plugin_upc/token",
+    "hint": "⚠️ 密码以明文保存在 AstrBot 的插件配置文件中，仅用于 CAS 自动登录；不想存可以留空，此时只能读取插件数据目录下的 token 文件",
     "default": ""
   },
   "auto_login": {

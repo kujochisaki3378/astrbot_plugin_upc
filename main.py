@@ -18,6 +18,7 @@ import http.cookiejar
 import json
 import os
 import re
+import shutil
 import ssl
 import sys
 import tempfile
@@ -33,9 +34,8 @@ from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, register
 
 # ================================================================ 通用 ====
+# 使用系统默认 CA 校验（不关闭证书验证）
 SSL_CTX = ssl.create_default_context()
-SSL_CTX.check_hostname = False
-SSL_CTX.verify_mode = ssl.CERT_NONE
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -72,8 +72,39 @@ CAMPUS_ALIASES = {
 
 # 图书馆
 LIB_BASE = "https://libspace.upc.edu.cn"
-# 登录态和白名单都放在用户目录下，跨平台、且插件更新不会丢
-DATA_DIR = os.path.join(os.path.expanduser("~"), ".astrbot_plugin_upc")
+PLUGIN_NAME = "astrbot_plugin_upc"
+# 旧版本数据目录（仅用于一次性迁移）
+LEGACY_DATA_DIR = os.path.join(os.path.expanduser("~"), ".astrbot_plugin_upc")
+
+
+def _resolve_data_dir():
+    """插件数据目录：优先 AstrBot 官方 data/plugin_data/<name>。
+
+    市场规范要求持久化数据放在 data/plugin_data/<plugin_name>，
+    这样用户迁移/审计时能找到；旧版本目录会自动迁移一次。
+    """
+    path = None
+    try:
+        from astrbot.api.star import StarTools
+        path = str(StarTools.get_data_dir(PLUGIN_NAME))
+    except Exception:  # noqa: BLE001  非 AstrBot 环境（如单元测试）
+        path = None
+    if not path:
+        path = LEGACY_DATA_DIR
+    try:
+        os.makedirs(path, exist_ok=True)
+        if path != LEGACY_DATA_DIR and os.path.isdir(LEGACY_DATA_DIR):
+            for name in ("token", "blacklist.json", "push.json"):
+                src = os.path.join(LEGACY_DATA_DIR, name)
+                dst = os.path.join(path, name)
+                if os.path.exists(src) and not os.path.exists(dst):
+                    shutil.copy2(src, dst)
+    except OSError:
+        pass
+    return path
+
+
+DATA_DIR = _resolve_data_dir()
 TOKEN_FILE = os.path.join(DATA_DIR, "token")
 LIB_HMAC_KEY = "leos3cr3t"   # 前端 NUMCODE 解出来的签名密钥
 LIB_BUILDINGS = {"东馆": 1, "总馆": 3}

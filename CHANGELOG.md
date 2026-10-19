@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.3] - 2026-10-19
+
+### 修复（插件市场审核整改）
+- **数据目录**：持久化数据从 `~/.astrbot_plugin_upc/` 改为 AstrBot 官方
+  `data/plugin_data/astrbot_plugin_upc/`，旧数据自动迁移一次
+- **TLS 安全**：移除全局 `check_hostname=False` / `CERT_NONE`，恢复系统默认证书校验
+- 文档同步更新数据目录说明
+
 ## [1.3.2] - 2026-10-19
 
 - 新增 ASCII 快捷命令 /upckb（课表）、/upckj（空教室）、/upcts（图书馆）

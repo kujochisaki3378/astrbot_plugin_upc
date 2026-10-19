@@ -12,6 +12,8 @@
 
 > 本项目完全由 **DSH（DeepSeek Harness）** 开发完成。
 
+当前版本：**1.3.3**（插件市场审核整改版：持久化数据迁至 AstrBot 的 `data/plugin_data/astrbot_plugin_upc/`，并恢复系统默认 TLS 证书校验）
+
 ## 功能
 
 | 命令 | 说明 | 需要登录 |
@@ -95,8 +97,9 @@ WebUI → 插件 → 石大查询 → 配置：
 | `password` | 数字石大密码（不是图书馆单独密码） |
 | `auto_login` | token 失效时自动登录，默认开启 |
 
-- 图书馆登录态存在 `~/.astrbot_plugin_upc/token`
-- 座位黑名单存在 `~/.astrbot_plugin_upc/blacklist.json`
+- 持久化数据统一在 AstrBot 的 `data/plugin_data/astrbot_plugin_upc/`：
+  `token`（图书馆登录态）、`blacklist.json`（座位黑名单）、`push.json`（推送订阅）
+- 旧版本存在 `~/.astrbot_plugin_upc/`，1.3.3 起自动迁移一次
 - 密码以**明文**保存在 AstrBot 的插件配置文件中；不想存就留空，改用 `/图书馆` 的免登录功能
 
 ## 数据来源
