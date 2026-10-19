@@ -18,7 +18,7 @@ desc: |
   不填也能用 /空教室、/附近、/图书馆 实时空座。
 
   说明：个人开发项目，与学校官方无关；只做查询，不做自动预约/抢座。
-version: 1.1.0
+version: 1.1.1
 author: kaoruko
 repo: https://github.com/CHANGE_ME/astrbot_plugin_upc
 astrbot_version: ">=4.10.0"

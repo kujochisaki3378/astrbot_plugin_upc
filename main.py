@@ -174,29 +174,46 @@ def _split_date_window(tokens, default_date):
     return date, window
 
 
+def _search_seats_all(date, begin, end, key, value, token, max_pages=60):
+    """分页拉完 searchSeats（接口每页 25 条），返回全部 seat 字典。"""
+    seats = {}
+    page = 1
+    while page <= max_pages:
+        path = ("/rest/v2/searchSeats/%s/%d/%d?%s=%s&page=%d"
+                % (date, begin, end, key, value, page))
+        obj = _lib_get(path, token=token)
+        data = obj.get("data")
+        if data is None:
+            if page == 1:
+                return None, obj.get("message") or "接口没返回数据"
+            break
+        batch = data.get("seats") or {}
+        seats.update(batch)
+        if not data.get("hasMore") or not batch:
+            break
+        page += 1
+    return seats, None
+
+
 def _lib_free_keys(room_id, date, window, token):
-    """指定时间段内可约的座位 key 集合。"""
+    """指定时间段内可约的座位 key 集合（自动翻页）。"""
     if not window:
         return None, None
     begin, end = window
-    path = "/rest/v2/searchSeats/%s/%d/%d?roomId=%s" % (date, begin, end, room_id)
-    obj = _lib_get(path, token=token)
-    data = obj.get("data")
-    if data is None:
-        return None, obj.get("message") or "接口没返回数据"
-    return set((data.get("seats") or {}).keys()), None
+    seats, err = _search_seats_all(date, begin, end, "roomId", room_id, token)
+    if seats is None:
+        return None, err
+    return set(seats.keys()), None
 
 
 def _lib_building_window(building_id, date, window, token):
-    """按时间段统计整栋楼各房间空位：返回 {roomId: free}。"""
+    """按时间段统计整栋楼各房间空位：返回 {roomId: free}（自动翻页）。"""
     begin, end = window
-    path = "/rest/v2/searchSeats/%s/%d/%d?buildingId=%s" % (date, begin, end, building_id)
-    obj = _lib_get(path, token=token)
-    data = obj.get("data")
-    if data is None:
-        return None, obj.get("message") or "接口没返回数据"
+    seats, err = _search_seats_all(date, begin, end, "buildingId", building_id, token)
+    if seats is None:
+        return None, err
     counts = {}
-    for _k, cell in (data.get("seats") or {}).items():
+    for _k, cell in seats.items():
         rid = cell.get("roomId")
         counts[rid] = counts.get(rid, 0) + 1
     return counts, None
