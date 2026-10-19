@@ -12,7 +12,7 @@
 
 > 本项目完全由 **DSH（DeepSeek Harness）** 开发完成。
 
-当前版本：**1.3.3**（插件市场审核整改版：持久化数据迁至 AstrBot 的 `data/plugin_data/astrbot_plugin_upc/`，并恢复系统默认 TLS 证书校验）
+当前版本：**1.3.4**（1.3.3 完成市场审核整改：数据迁到 `data/plugin_data/`、恢复 TLS 校验；1.3.4 修复地图分支的边界 bug）
 
 ## 功能
 

@@ -227,6 +227,13 @@ def _search_seats_all(date, begin, end, key, value, token, max_pages=60):
     return seats, None
 
 
+def _window_err_text(err):
+    """把接口的时间段错误翻成人话。"""
+    if err and "结束时间必须大于当前" in str(err):
+        return "这个时间段已经过去了，换个未来时段试试（例：明天 08:00-10:00）"
+    return err or "接口没有返回数据"
+
+
 def _lib_free_keys(room_id, date, window, token):
     """指定时间段内可约的座位 key 集合（自动翻页）。"""
     if not window:
@@ -668,7 +675,7 @@ def _lib_stats_text(building_name, date, token, window=None):
     if window:
         counts, err = _lib_building_window(bid, date, window, token)
         if counts is None:
-            return "⚠️ 按时间段查询失败：%s" % err
+            return "⚠️ 按时间段查询失败：%s" % _window_err_text(err)
         for r in rooms:
             r["free"] = counts.get(r.get("roomId"), 0)
     total_free = sum(r.get("free", 0) for r in rooms)
@@ -1547,7 +1554,7 @@ class UPCPlugin(Star):
                     free_keys, err = await asyncio.to_thread(
                         _lib_free_keys, args[1], date, window, token)
                     if free_keys is None and window:
-                        text = "⚠️ 按时间段查询失败：%s" % err
+                        text = "⚠️ 按时间段查询失败：%s" % _window_err_text(err)
                     else:
                         text = await asyncio.to_thread(
                             _lib_quiet_seats_text, args[1], date, token,
@@ -1563,7 +1570,7 @@ class UPCPlugin(Star):
                     free_keys, err = await asyncio.to_thread(
                         _lib_free_keys, args[1], date, window, token)
                     if free_keys is None and window:
-                        text = "⚠️ 按时间段查询失败：%s" % err
+                        text = "⚠️ 按时间段查询失败：%s" % _window_err_text(err)
                     else:
                         text = await asyncio.to_thread(
                             _lib_layout_text, args[1], date, token, free_keys, window)
@@ -1644,7 +1651,7 @@ class UPCPlugin(Star):
                         free_keys, err = await asyncio.to_thread(
                             _lib_free_keys, args[1], date, window, token)
                         if free_keys is None and window:
-                            text = "⚠️ 按时间段查询失败：%s" % err
+                            text = "⚠️ 按时间段查询失败：%s" % _window_err_text(err)
                         else:
                             png = os.path.join(tempfile.gettempdir(),
                                                "upc_seat_%s.png" % args[1])
@@ -1661,12 +1668,12 @@ class UPCPlugin(Star):
                                     % (d.get("name"), when,
                                        st["free"], st["seats"], st["used"],
                                        st.get("blocked", 0)))
-                        if st["seats"] > 0 and st["free"] == 0:
-                            text += ("\n\n⚠️ 这一天全部显示为已占（可能已闭馆或不可预约）。\n"
-                                     "试试：/图书馆 地图 %s 明天" % args[1])
-                        elif st["seats"] == 0:
-                            text += ("\n\n⚠️ 这一天的座位图是空的（可能已闭馆或还没开放）。\n"
-                                     "试试指定日期：/图书馆 地图 %s 明天" % args[1])
+                            if st["seats"] > 0 and st["free"] == 0:
+                                text += ("\n\n⚠️ 这一天全部显示为已占（可能已闭馆或不可预约）。\n"
+                                         "试试：/图书馆 地图 %s 明天" % args[1])
+                            elif st["seats"] == 0:
+                                text += ("\n\n⚠️ 这一天的座位图是空的（可能已闭馆或还没开放）。\n"
+                                         "试试指定日期：/图书馆 地图 %s 明天" % args[1])
             else:
                 text = ("可用：\n"
                         "/图书馆          实时空座\n"
