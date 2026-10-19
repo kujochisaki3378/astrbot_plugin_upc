@@ -28,7 +28,8 @@ import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event import filter, AstrMessageEvent, MessageChain
+from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, register
 
 # ================================================================ 通用 ====
@@ -517,6 +518,28 @@ BLACKLIST_FILE = os.path.join(DATA_DIR, "blacklist.json")
 def _ensure_data_dir():
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+PUSH_FILE = os.path.join(DATA_DIR, "push.json")
+
+
+def _load_push():
+    try:
+        with open(PUSH_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_push(data):
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(PUSH_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
         return True
     except OSError:
         return False
@@ -1263,6 +1286,12 @@ class UPCPlugin(Star):
         self._token_ts = 0.0
         self._uc_session = None
         self._uc_ts = 0.0
+        self._push_task = None
+        try:
+            loop = asyncio.get_running_loop()
+            self._push_task = loop.create_task(self._push_loop())
+        except RuntimeError:
+            self._push_task = None
 
     # ---------------- 登录态管理 ----------------
     def _cfg(self, key, default=None):
@@ -1332,6 +1361,48 @@ class UPCPlugin(Star):
 
         return _tt_format(params, week, data.get("classes") or [],
                           day=day, date_label=date_label)
+
+    # ---------------- 每日推送 ----------------
+    def _ensure_push_task(self):
+        if self._push_task and not self._push_task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            self._push_task = loop.create_task(self._push_loop())
+        except RuntimeError:
+            self._push_task = None
+
+    async def _push_loop(self):
+        while True:
+            await asyncio.sleep(20)
+            try:
+                await self._maybe_push()
+            except Exception:  # noqa: BLE001 推送失败不影响插件
+                pass
+
+    async def _maybe_push(self):
+        if str(self._cfg("daily_push_enabled", True)).lower() in (
+                "false", "0", "none", "off"):
+            return
+        state = _load_push()
+        if not state.get("enabled") or not state.get("target"):
+            return
+        want = str(self._cfg("daily_push_time") or state.get("time") or "23:00").strip()
+        now = datetime.datetime.now()
+        today = now.date().isoformat()
+        if now.strftime("%H:%M") != want or state.get("last_sent") == today:
+            return
+
+        text = await asyncio.to_thread(self._tt_sync, ["明天"])
+        chain = MessageChain([Plain("🌙 明天课表\n\n" + text)])
+        ok = False
+        try:
+            ok = await self.context.send_message(state["target"], chain)
+        except Exception:  # noqa: BLE001
+            ok = False
+        state["last_sent"] = today
+        state["last_result"] = "ok" if ok else "failed"
+        _save_push(state)
 
     def _sync_token(self):
         now = time.time()
@@ -1592,6 +1663,40 @@ class UPCPlugin(Star):
             text = "⚠️ 查课表失败：%s" % e
         yield event.plain_result(text)
 
+    # ---------------- 课表推送 ----------------
+    @filter.command("课表推送", alias={"推送课表"})
+    async def cmd_push(self, event: AstrMessageEvent):
+        """订阅每天 23:00 推送明天课表：/课表推送 开|关|状态"""
+        self._ensure_push_task()
+        args = _args(event, {"课表推送", "推送课表"})
+        sub = args[0] if args else ""
+        state = _load_push()
+
+        if sub in ("开", "开启", "on", "1"):
+            state["enabled"] = True
+            state["target"] = event.unified_msg_origin
+            state["time"] = str(self._cfg("daily_push_time") or "23:00")
+            if _save_push(state):
+                text = ("✅ 已订阅：每天 %s 推送「明天课表」到这个会话。\n"
+                        "关闭：/课表推送 关" % state["time"])
+            else:
+                text = "⚠️ 保存订阅失败（数据目录写不进去）"
+        elif sub in ("关", "关闭", "off", "0"):
+            state["enabled"] = False
+            _save_push(state)
+            text = "✅ 已关闭课表推送。"
+        elif sub in ("状态", "status"):
+            if state.get("enabled"):
+                text = ("📬 推送已开启\n时间：每天 %s\n目标：%s\n上次发送：%s"
+                        % (state.get("time") or "23:00", state.get("target"),
+                           state.get("last_sent") or "—"))
+            else:
+                text = "📭 推送未开启。发送 /课表推送 开 订阅。"
+        else:
+            body = await asyncio.to_thread(self._tt_sync, ["明天"])
+            text = "🌙 明天课表（测试推送）\n\n" + body
+        yield event.plain_result(text)
+
     # ---------------- 帮助 ----------------
     @filter.command("石大帮助", alias={"upc帮助"})
     async def cmd_help(self, event: AstrMessageEvent):
@@ -1612,5 +1717,6 @@ class UPCPlugin(Star):
             "/图书馆 座位 2       座位号（需登录）\n"
             "/图书馆 我的         预约记录（需登录）\n"
             "/课表              本周课表（需配置学号密码）\n"
-            "/课表 今天|明天|周三|第8周\n\n"
+            "/课表 今天|明天|周三|第8周\n"
+            "/课表推送 开|关|状态   每天定时推明天课表\n\n"
             "节次：上午/下午/晚上/白天/全天/3-4/10,11")

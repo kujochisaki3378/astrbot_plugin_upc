@@ -2,7 +2,7 @@
   "username": {
     "description": "学号",
     "type": "string",
-    "hint": "数字石大账号，仅用于自动登录换图书馆 token",
+    "hint": "数字石大账号，用于自动登录图书馆/课表",
     "default": ""
   },
   "password": {
@@ -16,5 +16,17 @@
     "type": "bool",
     "hint": "开启后填了学号密码就会自动换 token；关闭则只读本地 token 文件",
     "default": true
+  },
+  "daily_push_enabled": {
+    "description": "开启每日课表推送",
+    "type": "bool",
+    "hint": "总开关。还需要在聊天里发 /课表推送 开 订阅当前会话",
+    "default": true
+  },
+  "daily_push_time": {
+    "description": "每日推送时间",
+    "type": "string",
+    "hint": "24 小时制 HH:MM，例如 23:00",
+    "default": "23:00"
   }
 }
