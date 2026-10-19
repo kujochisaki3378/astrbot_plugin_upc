@@ -1102,6 +1102,156 @@ def _cas_login(user, password):
     return True, token
 
 
+# ====================================================== 智慧校园课表 ====
+UC_BASE = "https://app.upc.edu.cn"
+UC_LOGIN = UC_BASE + "/uc/wap/login"
+TT_INDEX = UC_BASE + "/timetable/wap/default/get-index"
+TT_DATA = UC_BASE + "/timetable/wap/default/get-datatmp"
+
+_WEEKDAY_NAME = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+
+class _UcSession:
+    """app.upc.edu.cn 的会话（Cookie 登录态）。"""
+
+    def __init__(self):
+        self.jar = http.cookiejar.CookieJar()
+        self.op = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(self.jar),
+            urllib.request.HTTPSHandler(context=SSL_CTX))
+        self.op.addheaders = [("User-Agent", UA),
+                              ("Accept-Language", "zh-CN,zh;q=0.9")]
+
+    def get(self, url):
+        try:
+            with self.op.open(urllib.request.Request(url), timeout=25) as r:
+                return r.geturl(), r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            return e.geturl(), e.read().decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001
+            return url, ""
+
+    def post_form(self, url, data):
+        body = urllib.parse.urlencode(data).encode()
+        try:
+            with self.op.open(urllib.request.Request(
+                    url, data=body, method="POST",
+                    headers={"Content-Type": "application/x-www-form-urlencoded",
+                             "X-Requested-With": "XMLHttpRequest"}), timeout=25) as r:
+                return r.geturl(), r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            return e.geturl(), e.read().decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001
+            return url, ""
+
+
+def _uc_login(user, password):
+    """CAS 登录 app.upc.edu.cn，返回 (_UcSession, err)。"""
+    s = _UcSession()
+    target = UC_BASE + "/site/weekschedule/index"
+    final, html = s.get(UC_LOGIN + "?redirect=" + urllib.parse.quote(target, safe=""))
+    m = re.search(r'name="execution"[^>]*value="([^"]+)"', html)
+    if not m:
+        return None, "没到 CAS 登录页（网络问题或页面改版）"
+    final, body = s.post_form(final, {
+        "username": user,
+        "password": password,
+        "submit": "LOGIN",
+        "type": "username_password",
+        "execution": m.group(1),
+        "_eventId": "submit",
+    })
+    if "用户名或密码错误" in body:
+        return None, "数字石大账号或密码错误"
+    return s, None
+
+
+def _tt_index(session):
+    _, body = session.get(TT_INDEX)
+    try:
+        obj = json.loads(body)
+    except json.JSONDecodeError:
+        return None, "课表接口返回异常"
+    if obj.get("e") != 0:
+        return None, obj.get("m") or "登录态失效"
+    return (obj.get("d") or {}).get("params") or {}, None
+
+
+def _tt_week_data(session, params, week):
+    _, body = session.post_form(TT_DATA, {
+        "year": params["year"], "term": params["term"],
+        "week": week, "type": 1})
+    try:
+        obj = json.loads(body)
+    except json.JSONDecodeError:
+        return None, "课表数据解析失败"
+    if obj.get("e") != 0:
+        return None, obj.get("m") or "登录态失效"
+    return (obj.get("d") or {}), None
+
+
+def _tt_week_of(date_str, params):
+    """日期 → 学期第几周。"""
+    try:
+        d = datetime.date.fromisoformat(date_str)
+        start = datetime.date.fromisoformat(str(params.get("startday"))[:10])
+    except (ValueError, TypeError):
+        return None
+    return (d - start).days // 7 + 1
+
+
+def _tt_parse_weekday(tok):
+    t = str(tok)
+    for i, name in enumerate(_WEEKDAY_NAME):
+        if t == name or t == "星期" + name[1:] or t == "礼拜" + name[1:]:
+            return i + 1
+    m = re.match(r"^(?:周|星期|礼拜)([1-7])$", t)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _tt_format(params, week, classes, day=None, date_label=None):
+    term_name = "%s 年第 %s 学期" % (params.get("year", ""), params.get("term", ""))
+    if day:
+        title = "📅 第 %d 周 · %s" % (week, _WEEKDAY_NAME[day - 1])
+        if date_label:
+            title += "（%s）" % date_label
+    else:
+        title = "📅 第 %d 周 · %s" % (week, term_name)
+
+    if not classes:
+        return title + "\n\n这个时间段没有课。"
+
+    picked = []
+    for c in classes:
+        if day and str(c.get("weekday")) != str(day):
+            continue
+        weeks = str(c.get("week") or "").split(",")
+        if str(week) not in weeks:
+            continue
+        picked.append(c)
+
+    if not picked:
+        return title + "\n\n没课，可以休息或者找个空教室自习。"
+
+    picked.sort(key=lambda x: (str(x.get("weekday")), str(x.get("lessons") or "")))
+    lines = [title, ""]
+    last_day = None
+    for c in picked:
+        wd = int(c.get("weekday") or 0)
+        if not day and wd != last_day:
+            lines.append("【%s】" % _WEEKDAY_NAME[wd - 1])
+            last_day = wd
+        t = c.get("course_time") or c.get("lessons") or ""
+        lines.append("  %-14s %s" % (t, c.get("course_name", "?")))
+        extra = "    @%s" % c.get("location", "") if c.get("location") else ""
+        if c.get("teacher"):
+            extra += "  %s" % c["teacher"]
+        lines.append(extra)
+    return "\n".join(lines)
+
+
 # ================================================================ 插件 ====
 @register("astrbot_plugin_upc", "kaoruko",
           "石大查询：空教室 / 附近教室 / 图书馆空座", "0.1.0")
@@ -1111,6 +1261,8 @@ class UPCPlugin(Star):
         self.config = config or {}
         self._token = None
         self._token_ts = 0.0
+        self._uc_session = None
+        self._uc_ts = 0.0
 
     # ---------------- 登录态管理 ----------------
     def _cfg(self, key, default=None):
@@ -1122,6 +1274,64 @@ class UPCPlugin(Star):
     async def _get_token(self):
         """取图书馆 token：本地有效就用；失效则用配置里的账号密码自动登录。"""
         return await asyncio.to_thread(self._sync_token)
+
+    # ---------------- 课表 ----------------
+    def _uc_get(self, force=False):
+        now = time.time()
+        if not force and self._uc_session and now - self._uc_ts < 1200:
+            return self._uc_session
+        user = str(self._cfg("username") or "").strip()
+        pwd = str(self._cfg("password") or "").strip()
+        if not user or not pwd:
+            raise RuntimeError("插件配置里没有学号/密码")
+        sess, err = _uc_login(user, pwd)
+        if not sess:
+            raise RuntimeError(err)
+        self._uc_session = sess
+        self._uc_ts = now
+        return sess
+
+    def _tt_sync(self, args):
+        sess = self._uc_get()
+        params, err = _tt_index(sess)
+        if params is None:
+            sess = self._uc_get(force=True)
+            params, err = _tt_index(sess)
+            if params is None:
+                return "⚠️ 课表登录失败：%s" % err
+
+        now = datetime.date.today()
+        cur_week = int(params.get("week") or 1)
+        week, day, date_label = cur_week, None, None
+
+        for tok in args:
+            t = str(tok)
+            if t in ("今天", "明天", "后天", "today", "tomorrow"):
+                d = _parse_date_arg(t)
+                dobj = datetime.date.fromisoformat(d)
+                day = dobj.weekday() + 1
+                date_label = "%d月%d日" % (dobj.month, dobj.day)
+                w = _tt_week_of(d, params)
+                if w:
+                    week = w
+            elif _tt_parse_weekday(t):
+                day = _tt_parse_weekday(t)
+                date_label = None
+            else:
+                m = re.match(r"^(?:第)?(\d{1,2})周?$", t)
+                if m:
+                    week = int(m.group(1))
+
+        week = max(1, min(int(params.get("countweek") or 20), week))
+        data, err = _tt_week_data(sess, params, week)
+        if data is None:
+            sess = self._uc_get(force=True)
+            data, err = _tt_week_data(sess, params, week)
+            if data is None:
+                return "⚠️ 取课表失败：%s" % err
+
+        return _tt_format(params, week, data.get("classes") or [],
+                          day=day, date_label=date_label)
 
     def _sync_token(self):
         now = time.time()
@@ -1371,6 +1581,17 @@ class UPCPlugin(Star):
                 except Exception:  # noqa: BLE001 图片发不出去就算了，文字已经有了
                     pass
 
+    # ---------------- 课表 ----------------
+    @filter.command("课表", alias={"课程表"})
+    async def cmd_timetable(self, event: AstrMessageEvent):
+        """查课表：/课表 | 今天 | 明天 | 周三 | 第8周"""
+        args = _args(event, {"课表", "课程表"})
+        try:
+            text = await asyncio.to_thread(self._tt_sync, args)
+        except Exception as e:  # noqa: BLE001
+            text = "⚠️ 查课表失败：%s" % e
+        yield event.plain_result(text)
+
     # ---------------- 帮助 ----------------
     @filter.command("石大帮助", alias={"upc帮助"})
     async def cmd_help(self, event: AstrMessageEvent):
@@ -1389,5 +1610,7 @@ class UPCPlugin(Star):
             "                     /图书馆 地图 2 明天 08:00-10:00\n"
             "/图书馆 东馆 08:00-10:00  房间空位（可按时间）\n"
             "/图书馆 座位 2       座位号（需登录）\n"
-            "/图书馆 我的         预约记录（需登录）\n\n"
+            "/图书馆 我的         预约记录（需登录）\n"
+            "/课表              本周课表（需配置学号密码）\n"
+            "/课表 今天|明天|周三|第8周\n\n"
             "节次：上午/下午/晚上/白天/全天/3-4/10,11")
