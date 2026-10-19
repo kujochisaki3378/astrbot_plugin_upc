@@ -23,8 +23,8 @@ desc: |
 
   说明：个人开发项目，与学校官方无关；只做查询，不做自动预约/抢座。
 version: 1.3.2
-author: kaoruko
-repo: https://github.com/CHANGE_ME/astrbot_plugin_upc
+author: kujochisaki
+repo: https://github.com/kujochisaki3378/astrbot_plugin_upc
 astrbot_version: ">=4.10.0"
 support_platforms:
   - aiocqhttp

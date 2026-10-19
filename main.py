@@ -632,7 +632,7 @@ def _lib_stats_text(building_name, date, token, window=None):
     obj = _lib_get("/rest/v2/room/stats2/%s/%s" % (bid, date), token=token)
     if obj.get("status") != "success":
         return ("⚠️ 图书馆登录态失效了。\n"
-                "在电脑上跑一次 login.bat 重新登录。\n（%s）" % (obj.get("message") or "接口异常"))
+                "请在插件配置里填学号+密码，插件会自动重新登录。\n（%s）" % (obj.get("message") or "接口异常"))
     rooms = obj.get("data") or []
     if window:
         counts, err = _lib_building_window(bid, date, window, token)
@@ -656,7 +656,7 @@ def _lib_layout_text(room_id, date, token, free_keys=None, window=None):
     obj = _lib_get("/rest/v2/room/layoutByDate/%s/%s" % (room_id, date), token=token)
     if obj.get("status") != "success":
         return ("⚠️ 图书馆登录态失效了。\n"
-                "在电脑上跑一次 login.bat 重新登录。\n（%s）" % (obj.get("message") or "接口异常"))
+                "请在插件配置里填学号+密码，插件会自动重新登录。\n（%s）" % (obj.get("message") or "接口异常"))
     d = obj.get("data") or {}
     layout = d.get("layout") or {}
 
@@ -690,7 +690,7 @@ def _lib_quiet_seats_text(room_id, date, token, radius=2, top=10, blacklist=None
     """从座位图里挑「周围没人的座位」：周边格子被占越少越安静。"""
     obj = _lib_get("/rest/v2/room/layoutByDate/%s/%s" % (room_id, date), token=token)
     if obj.get("status") != "success":
-        return ("⚠️ token 过期了（重新登录：电脑上跑 login.bat）。\n（%s）"
+        return ("⚠️ token 过期了（在插件配置里填学号+密码即可自动登录）。\n（%s）"
                 % (obj.get("message") or "接口异常"))
     d = obj.get("data") or {}
     cols = int(d.get("cols") or 1)
@@ -796,7 +796,7 @@ def _lib_reservations_text(token):
     obj = _lib_get("/rest/v2/user/reservations", token=token)
     if obj.get("status") != "success":
         return ("⚠️ 图书馆登录态失效了。\n"
-                "在电脑上跑一次 login.bat 重新登录。\n（%s）" % (obj.get("message") or "接口异常"))
+                "请在插件配置里填学号+密码，插件会自动重新登录。\n（%s）" % (obj.get("message") or "接口异常"))
     data = obj.get("data")
     if not data:
         return "📋 当前没有预约。"
@@ -1290,7 +1290,7 @@ def _tt_format(params, week, classes, day=None, date_label=None):
 
 
 # ================================================================ 插件 ====
-@register("astrbot_plugin_upc", "kaoruko",
+@register("astrbot_plugin_upc", "kujochisaki",
           "石大查询：空教室 / 附近教室 / 图书馆空座", "0.1.0")
 class UPCPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -1502,14 +1502,14 @@ class UPCPlugin(Star):
                 token = await self._get_token()
                 if not token:
                     text = ("⚠️ 房间级查询需要图书馆登录态。\n"
-                            "在电脑上跑一次 login.bat（约 10 秒），或者先看 /图书馆 的实时空座。")
+                            "先在插件配置里填学号+密码即可自动登录；也可以先看 /图书馆 的实时空座（免登录）。")
                 else:
                     text = await asyncio.to_thread(
                         _lib_stats_text, sub, date, token, window)
             elif sub in ("空位", "安静", "筛选"):
                 token = await self._get_token()
                 if not token:
-                    text = "⚠️ 查空位需要图书馆登录态（先在插件配置里填学号密码（或跑 login.bat））。"
+                    text = "⚠️ 查空位需要图书馆登录态（先在插件配置里填学号+密码）。"
                 elif len(args) < 2 or not args[1].isdigit():
                     text = "用法：/图书馆 空位 <房间id>\n例：/图书馆 空位 2（阅览区1F-A）"
                 else:
@@ -1525,7 +1525,7 @@ class UPCPlugin(Star):
             elif sub in ("座位", "座位图"):
                 token = await self._get_token()
                 if not token:
-                    text = "⚠️ 查座位图需要图书馆登录态（先在插件配置里填学号密码（或跑 login.bat））。"
+                    text = "⚠️ 查座位图需要图书馆登录态（先在插件配置里填学号+密码）。"
                 elif len(args) < 2 or not args[1].isdigit():
                     text = "用法：/图书馆 座位 <房间id>\n例：/图书馆 座位 2"
                 else:
@@ -1539,7 +1539,7 @@ class UPCPlugin(Star):
             elif sub in ("我的", "预约"):
                 token = await self._get_token()
                 if not token:
-                    text = "⚠️ 查预约需要图书馆登录态（先在插件配置里填学号密码（或跑 login.bat））。"
+                    text = "⚠️ 查预约需要图书馆登录态（先在插件配置里填学号+密码）。"
                 else:
                     text = await asyncio.to_thread(_lib_reservations_text, token)
             elif sub in ("列表", "房间", "房间列表"):
@@ -1598,7 +1598,7 @@ class UPCPlugin(Star):
                 token = await self._get_token()
                 if not token:
                     text = ("⚠️ 查座位示意图需要图书馆登录态。\n"
-                            "先在插件配置里填学号密码（或跑 login.bat）。")
+                            "先在插件配置里填学号+密码。")
                 elif len(args) < 2 or not args[1].isdigit():
                     text = "用法：/图书馆 地图 <房间id>\n例：/图书馆 地图 2（阅览区1F-A）"
                 else:

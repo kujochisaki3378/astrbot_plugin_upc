@@ -65,7 +65,7 @@ Telegram 的 Bot 菜单只能平铺命令、不支持中文命令名，所以插
 
 ```bash
 cd AstrBot/data/plugins
-git clone https://github.com/CHANGE_ME/astrbot_plugin_upc
+git clone https://github.com/kujochisaki3378/astrbot_plugin_upc
 ```
 
 然后 WebUI → 插件 → 启用。

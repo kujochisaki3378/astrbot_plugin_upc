@@ -8,7 +8,7 @@
   "password": {
     "description": "数字石大密码",
     "type": "string",
-    "hint": "⚠️ 明文保存在本机配置文件；只用于自动登录。不想存就留空，改用 login.bat 手动续 token",
+    "hint": "⚠️ 明文保存在本机配置文件；只用于自动登录。不想存可以留空，此时只能读取 ~/.astrbot_plugin_upc/token",
     "default": ""
   },
   "auto_login": {
