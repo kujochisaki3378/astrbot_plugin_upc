@@ -1708,11 +1708,41 @@ class UPCPlugin(Star):
             text = "🌙 明天课表（测试推送）\n\n" + body
         return text
 
+    # ---------------- ASCII 快捷命令（TG 菜单可点） ----------------
+    @filter.command("upckb")
+    async def cmd_upckb(self, event: AstrMessageEvent):
+        """课表：本周/今天/明天/第N周"""
+        args = _args(event, {"upckb"})
+        text = "/课表" + (" " + " ".join(args) if args else "")
+        async for r in self.cmd_timetable(_EventProxy(event, text)):
+            yield r
+
+    @filter.command("upckj")
+    async def cmd_upckj(self, event: AstrMessageEvent):
+        """空教室：/upckj [楼] [节次]"""
+        args = _args(event, {"upckj"})
+        text = "/空教室" + (" " + " ".join(args) if args else "")
+        async for r in self.cmd_freeclass(_EventProxy(event, text)):
+            yield r
+
+    @filter.command("upcts")
+    async def cmd_upcts(self, event: AstrMessageEvent):
+        """图书馆座位：/upcts 东馆|地图 2|空位 2"""
+        args = _args(event, {"upcts"})
+        text = "/图书馆" + (" " + " ".join(args) if args else "")
+        async for r in self.cmd_library(_EventProxy(event, text)):
+            yield r
+
     # ---------------- 帮助 ----------------
     def _help_text(self):
         return (
             "🏫 石大查询\n\n"
-            "TG 菜单里只有一个入口 /upc，也可以直接用中文命令：\n"
+            "TG 菜单快捷入口：\n"
+            "  /upckb [今天|明天|第8周]  课表\n"
+            "  /upckj [楼] [节次]        空教室\n"
+            "  /upcts [东馆|地图 2]      图书馆座位\n"
+            "  /upc                      完整帮助\n\n"
+            "也可以直接用中文命令：\n"
             "  /upc            显示这份帮助\n"
             "  /upc 课表       等同 /课表\n"
             "  /upc 空教室     等同 /空教室\n"

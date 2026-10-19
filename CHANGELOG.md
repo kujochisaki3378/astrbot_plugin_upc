@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.3.2] - 2026-10-19
+
+- 新增 ASCII 快捷命令 /upckb（课表）、/upckj（空教室）、/upcts（图书馆）
+- 可用于 Telegram 菜单点击，支持附带参数
+
 ## [1.3.1] - 2026-10-19
 
 - 精简 Telegram 菜单：只注册 4 个中文命令 + 1 个 ASCII 入口 /upc
