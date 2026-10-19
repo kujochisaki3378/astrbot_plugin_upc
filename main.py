@@ -238,6 +238,20 @@ def _parse_date_arg(tok):
     return today.isoformat()
 
 
+class _EventProxy:
+    """把消息文本换掉、其余委托给原事件的轻量代理。"""
+
+    def __init__(self, event, text):
+        self._event = event
+        self.message_str = text
+
+    def __getattr__(self, name):
+        return getattr(self._event, name)
+
+    def plain_result(self, text):
+        return self._event.plain_result(text)
+
+
 def _args(event, names):
     text = (event.message_str or "").replace("\u3000", " ").strip()
     toks = [t for t in text.split() if t and not t.startswith("@")]
@@ -1428,10 +1442,23 @@ class UPCPlugin(Star):
         return None
 
     # ---------------- 空教室 ----------------
-    @filter.command("空教室", alias={"空闲教室", "自习室"})
+    @filter.command("空教室")
     async def cmd_freeclass(self, event: AstrMessageEvent):
-        """查空教室：/空教室 [教学楼] [节次]"""
-        args = _args(event, {"空教室", "空闲教室", "自习室"})
+        """空教室 / 附近教室（免登录）"""
+        args = _args(event, {"空教室"})
+        if args and args[0] in ("附近", "周边", "nearby"):
+            rest = args[1:]
+            if not rest:
+                yield event.plain_result("用法：/空教室 附近 南教305 [节次]")
+                return
+            periods_n = _parse_periods(rest[1] if len(rest) > 1 else None)
+            try:
+                nb = await asyncio.to_thread(_fc_find_nearby, rest[0], _today(), periods_n)
+                text_n = _render_nearby(nb)
+            except Exception as e:  # noqa: BLE001
+                text_n = "⚠️ 查询失败：%s" % e
+            yield event.plain_result(text_n)
+            return
         building = "全部"
         periods_text = None
         if args:
@@ -1454,27 +1481,11 @@ class UPCPlugin(Star):
             text = "⚠️ 查询失败：%s" % e
         yield event.plain_result(text)
 
-    # ---------------- 附近教室 ----------------
-    @filter.command("附近", alias={"附近教室"})
-    async def cmd_nearby(self, event: AstrMessageEvent):
-        """查某教室附近：/附近 南教305 [节次]"""
-        args = _args(event, {"附近", "附近教室"})
-        if not args:
-            yield event.plain_result("用法：/附近 南教305 [节次]\n例：/附近 南教305 3-4")
-            return
-        periods = _parse_periods(args[1] if len(args) > 1 else None)
-        try:
-            nb = await asyncio.to_thread(_fc_find_nearby, args[0], _today(), periods)
-            text = _render_nearby(nb)
-        except Exception as e:  # noqa: BLE001
-            text = "⚠️ 查询失败：%s" % e
-        yield event.plain_result(text)
-
     # ---------------- 图书馆 ----------------
-    @filter.command("图书馆", alias={"座位", "空座"})
+    @filter.command("图书馆")
     async def cmd_library(self, event: AstrMessageEvent):
-        """图书馆：/图书馆 | 东馆 | 总馆 | 座位 <id> | 我的"""
-        args = _args(event, {"图书馆", "座位", "空座"})
+        """图书馆座位：空位/地图/黑名单"""
+        args = _args(event, {"图书馆"})
         sub = args[0] if args else ""
         date = _lib_default_date()
         window = None
@@ -1653,22 +1664,22 @@ class UPCPlugin(Star):
                     pass
 
     # ---------------- 课表 ----------------
-    @filter.command("课表", alias={"课程表"})
+    @filter.command("课表")
     async def cmd_timetable(self, event: AstrMessageEvent):
-        """查课表：/课表 | 今天 | 明天 | 周三 | 第8周"""
-        args = _args(event, {"课表", "课程表"})
+        """课表查询与每日推送"""
+        args = _args(event, {"课表"})
+        if args and args[0] in ("推送", "push"):
+            yield event.plain_result(await self._push_text(event, args[1:]))
+            return
         try:
             text = await asyncio.to_thread(self._tt_sync, args)
         except Exception as e:  # noqa: BLE001
             text = "⚠️ 查课表失败：%s" % e
         yield event.plain_result(text)
 
-    # ---------------- 课表推送 ----------------
-    @filter.command("课表推送", alias={"推送课表"})
-    async def cmd_push(self, event: AstrMessageEvent):
-        """订阅每天 23:00 推送明天课表：/课表推送 开|关|状态"""
+    # ---------------- 课表推送（由 /课表 推送 调用） ----------------
+    async def _push_text(self, event: AstrMessageEvent, args):
         self._ensure_push_task()
-        args = _args(event, {"课表推送", "推送课表"})
         sub = args[0] if args else ""
         state = _load_push()
 
@@ -1678,7 +1689,7 @@ class UPCPlugin(Star):
             state["time"] = str(self._cfg("daily_push_time") or "23:00")
             if _save_push(state):
                 text = ("✅ 已订阅：每天 %s 推送「明天课表」到这个会话。\n"
-                        "关闭：/课表推送 关" % state["time"])
+                        "关闭：/课表 推送 关" % state["time"])
             else:
                 text = "⚠️ 保存订阅失败（数据目录写不进去）"
         elif sub in ("关", "关闭", "off", "0"):
@@ -1691,19 +1702,23 @@ class UPCPlugin(Star):
                         % (state.get("time") or "23:00", state.get("target"),
                            state.get("last_sent") or "—"))
             else:
-                text = "📭 推送未开启。发送 /课表推送 开 订阅。"
+                text = "📭 推送未开启。发送 /课表 推送 开 订阅。"
         else:
             body = await asyncio.to_thread(self._tt_sync, ["明天"])
             text = "🌙 明天课表（测试推送）\n\n" + body
-        yield event.plain_result(text)
+        return text
 
     # ---------------- 帮助 ----------------
-    @filter.command("石大帮助", alias={"upc帮助"})
-    async def cmd_help(self, event: AstrMessageEvent):
-        yield event.plain_result(
+    def _help_text(self):
+        return (
             "🏫 石大查询\n\n"
+            "TG 菜单里只有一个入口 /upc，也可以直接用中文命令：\n"
+            "  /upc            显示这份帮助\n"
+            "  /upc 课表       等同 /课表\n"
+            "  /upc 空教室     等同 /空教室\n"
+            "  /upc 图书馆     等同 /图书馆\n\n"
             "/空教室 [楼] [节次]   例：/空教室 南教楼 3-4\n"
-            "/附近 南教305 [节次]  看附近哪间空着\n"
+            "/空教室 附近 305    看某教室附近哪间空着\n"
             "/图书馆              实时空座 / 开馆时间\n"
             "/图书馆 东馆         各房间空位（需登录）\n"
             "/图书馆 列表         房间 id 列表（需登录）\n"
@@ -1718,5 +1733,35 @@ class UPCPlugin(Star):
             "/图书馆 我的         预约记录（需登录）\n"
             "/课表              本周课表（需配置学号密码）\n"
             "/课表 今天|明天|周三|第8周\n"
-            "/课表推送 开|关|状态   每天定时推明天课表\n\n"
+            "/课表 推送 开|关|状态   每天定时推明天课表\n\n"
             "节次：上午/下午/晚上/白天/全天/3-4/10,11")
+
+    @filter.command("石大帮助")
+    async def cmd_help(self, event: AstrMessageEvent):
+        """查看全部命令"""
+        yield event.plain_result(self._help_text())
+
+    # ---------------- ASCII 菜单入口 ----------------
+    @filter.command("upc")
+    async def cmd_upc(self, event: AstrMessageEvent):
+        """石大查询：课表/空教室/图书馆"""
+        args = _args(event, {"upc"})
+        if not args:
+            yield event.plain_result(self._help_text())
+            return
+        routes = {
+            "课表": "cmd_timetable",
+            "空教室": "cmd_freeclass",
+            "教室": "cmd_freeclass",
+            "图书馆": "cmd_library",
+            "座位": "cmd_library",
+        }
+        handler_name = routes.get(args[0])
+        if not handler_name:
+            yield event.plain_result(
+                "不认识的子命令：%s\n用法：/upc 课表 | 空教室 | 图书馆" % args[0])
+            return
+        text = "/" + args[0] + (" " + " ".join(args[1:]) if len(args) > 1 else "")
+        proxy = _EventProxy(event, text)
+        async for r in getattr(self, handler_name)(proxy):
+            yield r
