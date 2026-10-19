@@ -598,21 +598,36 @@ def _lib_stats_text(building_name, date, token, window=None):
     return "\n".join(lines)
 
 
-def _lib_layout_text(room_id, date, token):
+def _lib_layout_text(room_id, date, token, free_keys=None, window=None):
     obj = _lib_get("/rest/v2/room/layoutByDate/%s/%s" % (room_id, date), token=token)
     if obj.get("status") != "success":
         return ("⚠️ 图书馆登录态失效了。\n"
                 "在电脑上跑一次 login.bat 重新登录。\n（%s）" % (obj.get("message") or "接口异常"))
     d = obj.get("data") or {}
-    cells = list((d.get("layout") or {}).values())
-    seats = [c for c in cells if c.get("type") == "seat" and c.get("enabled") is not False]
-    free = [c for c in seats if c.get("status") == "FREE"]
-    lines = ["🪑 %s · %s" % (d.get("name"), _date_label(date)),
+    layout = d.get("layout") or {}
+
+    seats = []
+    free = []
+    for k, c in layout.items():
+        if c.get("type") != "seat" or c.get("enabled") is False:
+            continue
+        seats.append(c)
+        is_free = (k in free_keys) if free_keys is not None else (c.get("status") == "FREE")
+        if is_free:
+            free.append(c)
+
+    when = _date_label(date)
+    if window:
+        when += " · %s-%s" % (_fmt_min(window[0]), _fmt_min(window[1]))
+
+    lines = ["🪑 %s · %s" % (d.get("name"), when),
              "空位：%d / %d" % (len(free), len(seats))]
     if free:
         names = sorted(c.get("name", "?") for c in free)
-        preview = " ".join(names[:30])
-        lines.append("座位号：" + preview + (" …" if len(names) > 30 else ""))
+        preview = " ".join(names[:40])
+        lines.append("座位号：" + preview + (" …" if len(names) > 40 else ""))
+    else:
+        lines.append("这个时段没有可约座位。")
     return "\n".join(lines)
 
 
@@ -1205,7 +1220,13 @@ class UPCPlugin(Star):
                 elif len(args) < 2 or not args[1].isdigit():
                     text = "用法：/图书馆 座位 <房间id>\n例：/图书馆 座位 2"
                 else:
-                    text = await asyncio.to_thread(_lib_layout_text, args[1], date, token)
+                    free_keys, err = await asyncio.to_thread(
+                        _lib_free_keys, args[1], date, window, token)
+                    if free_keys is None and window:
+                        text = "⚠️ 按时间段查询失败：%s" % err
+                    else:
+                        text = await asyncio.to_thread(
+                            _lib_layout_text, args[1], date, token, free_keys, window)
             elif sub in ("我的", "预约"):
                 token = await self._get_token()
                 if not token:
